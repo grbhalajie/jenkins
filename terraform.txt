@@ -1,0 +1,150 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+  }
+}
+
+# Configure the AWS Provider
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_vpc" "my-vpc" {
+  cidr_block       = "10.0.0.0/16"
+  instance_tenancy = "default"
+
+  tags = {
+    Name = "my-vpc-1"
+  }
+}
+
+resource "aws_subnet" "pubsub" {
+  vpc_id     = aws_vpc.my-vpc.id
+  cidr_block = "10.0.1.0/24"
+  availability_zone = "us-east-1a"
+
+  tags = {
+    Name = "subnetpublic"
+  }
+}
+
+resource "aws_subnet" "prvsub" {
+  vpc_id     = aws_vpc.my-vpc.id
+  cidr_block = "10.0.2.0/24"
+  availability_zone = "us-east-1b"
+
+  tags = {
+    Name = "subnetprivate"
+  }
+}
+
+resource "aws_internet_gateway" "internegateway" {
+  vpc_id = aws_vpc.my-vpc.id
+
+  tags = {
+    Name = "internet-gate-way"
+  }
+}
+
+resource "aws_route_table" "pubroute" {
+  vpc_id = aws_vpc.my-vpc.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.internegateway.id
+  }
+
+  tags = {
+    Name = "pubroute"
+  }
+}
+
+resource "aws_route_table_association" "pub" {
+  subnet_id      = aws_subnet.pubsub.id
+  route_table_id = aws_route_table.pubroute.id
+}
+
+resource "aws_eip" "nateip" {
+  domain   = "vpc"
+}
+
+resource "aws_nat_gateway" "natgateway" {
+  allocation_id = aws_eip.nateip.id
+  subnet_id     = aws_subnet.pubsub.id
+
+  tags = {
+    Name = " NATgateway"
+  }
+
+resource "aws_route_table" "pvtroute" {
+  vpc_id = aws_vpc.my-vpc.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_nat_gateway.natgateway.id
+  }
+
+  tags = {
+    Name = "pvtroute"
+  }
+}
+
+resource "aws_route_table_association" "pvt" {
+  subnet_id      = aws_subnet.prvsub.id
+  route_table_id = aws_route_table.pvtroute.id
+}
+
+resource "aws_security_group" "allow_pub" {
+  name        = "allow_pub"
+  description = "Allow TLS inbound traffic"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description      = "TLS from VPC"
+    from_port        = 22
+    to_port          = 22
+    protocol         = "tcp"
+    cidr_blocks      = [0.0.0.0/0]
+  }
+
+  ingress {
+    description      = "TLS from VPC"
+    from_port        = 80
+    to_port          = 80
+    protocol         = "tcp"
+    cidr_blocks      = [0.0.0.0/0]
+  }
+
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["0.0.0.0/0"]
+    ipv6_cidr_blocks = ["::/0"]
+  }
+
+  tags = {
+    Name = "securitygroup pub"
+  }
+}
+
+resource "aws_instance" "terraform" {
+  ami                         = "ami-053b0d53c279acc90 "
+  instance_type               = "t2.micro"
+  subnet_id                   = aws_subnet.pubsub.id
+  vpc_security_group_ids      = [aws_security_group.allow_pub.id]
+  key_name                    = "slavekey"
+  associate_public_ip_address = true
+}
+
+resource "aws_instance" "terraform2" {
+  ami                         = "ami-053b0d53c279acc90 "
+  instance_type               = "t2.micro"
+  subnet_id                   = aws_subnet.prvsub.id
+  vpc_security_group_ids      = [aws_security_group.allow_pub.id]
+  key_name                    = "slavekey"
+}
+ 
